@@ -8,6 +8,8 @@ from bot.states import UserStates
 from bot.database.models import Database
 from bot.locales.texts import get_text
 from bot.utils.formatting import format_number, parse_amount
+from bot.utils.message_manager import delete_previous_messages, track_bot_message
+from bot import get_bot_instance
 
 router = Router()
 
@@ -222,8 +224,17 @@ async def show_main_menu(message: Message, db: Database, user_id: int):
     language = user['language'] if user else 'uz_latin'
 
     from bot.handlers.dua_handlers import get_main_menu_keyboard
+    
+    # Удаляем предыдущие сообщения бота
+    bot = get_bot_instance()
+    if bot:
+        await delete_previous_messages(bot, db, user_id, message.chat.id)
 
-    await message.answer(
+    sent_message = await message.answer(
         get_text(language, "main_menu"),
         reply_markup=get_main_menu_keyboard(language)
     )
+    
+    # Сохраняем ID отправленного сообщения
+    await track_bot_message(db, user_id, message.chat.id, sent_message.message_id)
+

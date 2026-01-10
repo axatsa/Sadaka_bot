@@ -7,6 +7,8 @@ from bot.states import UserStates
 from bot.database.models import Database
 from bot.locales.texts import get_text
 from bot.utils.formatting import format_number, parse_amount
+from bot.utils.message_manager import delete_previous_messages, track_bot_message
+from bot import get_bot_instance
 
 router = Router()
 
@@ -110,7 +112,15 @@ async def _send_marathon_stats(message: Message, db: Database, user_id: int, is_
     if is_callback:
         await message.edit_text(stats_text, reply_markup=builder.as_markup())
     else:
-        await message.answer(stats_text, reply_markup=builder.as_markup())
+        # Удаляем предыдущие сообщения бота
+        bot = get_bot_instance()
+        if bot:
+            await delete_previous_messages(bot, db, user_id, message.chat.id)
+        
+        sent_message = await message.answer(stats_text, reply_markup=builder.as_markup())
+        
+        # Сохраняем ID отправленного сообщения
+        await track_bot_message(db, user_id, message.chat.id, sent_message.message_id)
 
 
 @router.callback_query(F.data.startswith("calendar_"))
@@ -289,7 +299,10 @@ async def send_daily_stats(message: Message, db: Database, user_id: int, maratho
         day_progress=day_progress
     )
     
-    await message.answer(stats_text)
+    sent_message = await message.answer(stats_text)
+    
+    # Сохраняем ID отправленного сообщения
+    await track_bot_message(db, user_id, message.chat.id, sent_message.message_id)
 
 
 @router.callback_query(F.data == "morning_yes")

@@ -75,6 +75,17 @@ class Database:
                 )
             """)
 
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS bot_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    chat_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            """)
+
             await db.commit()
 
     async def get_user(self, user_id: int):
@@ -422,3 +433,49 @@ class Database:
             async with db.execute("SELECT user_id, language FROM users") as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
+
+    # Bot messages management methods
+    async def add_bot_message(self, user_id: int, chat_id: int, message_id: int):
+        """Сохранить ID сообщения бота для последующего удаления"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """INSERT INTO bot_messages (user_id, chat_id, message_id)
+                   VALUES (?, ?, ?)""",
+                (user_id, chat_id, message_id)
+            )
+            await db.commit()
+
+    async def get_bot_messages(self, user_id: int, chat_id: int):
+        """Получить список сообщений бота для пользователя"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT id, message_id, created_at 
+                   FROM bot_messages 
+                   WHERE user_id = ? AND chat_id = ?
+                   ORDER BY created_at ASC""",
+                (user_id, chat_id)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def remove_bot_messages(self, message_ids: list):
+        """Удалить записи о сообщениях из базы данных"""
+        async with aiosqlite.connect(self.db_path) as db:
+            placeholders = ','.join('?' * len(message_ids))
+            await db.execute(
+                f"DELETE FROM bot_messages WHERE message_id IN ({placeholders})",
+                message_ids
+            )
+            await db.commit()
+
+    async def clear_old_bot_messages(self, days: int = 7):
+        """Очистить старые записи о сообщениях (старше N дней)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """DELETE FROM bot_messages 
+                   WHERE created_at < datetime('now', '-' || ? || ' days')""",
+                (days,)
+            )
+            await db.commit()
+
