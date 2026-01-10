@@ -7,6 +7,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.states import UserStates
 from bot.database.models import Database
 from bot.locales.texts import get_text
+from bot.utils.formatting import format_number, parse_amount
 
 router = Router()
 
@@ -101,7 +102,7 @@ async def receive_daily_plan(message: Message, state: FSMContext, db: Database):
 
     # Валидация ввода
     try:
-        daily_plan = int(message.text)
+        daily_plan = parse_amount(message.text)
         if daily_plan < 1000:
             await message.answer(get_text(language, "daily_plan_too_small"))
             return
@@ -122,8 +123,8 @@ async def receive_daily_plan(message: Message, state: FSMContext, db: Database):
             get_text(
                 language, 
                 "daily_plan_accepted", 
-                daily_plan=f"{daily_plan:,}".replace(",", " "), 
-                total_projected=f"{total_projected:,}".replace(",", " "),
+                daily_plan=format_number(daily_plan),
+                total_projected=format_number(total_projected),
                 contribution_percent=contribution_percent
             )
         )

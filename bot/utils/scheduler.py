@@ -1,6 +1,7 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
+import pytz
 from aiogram import Bot
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -14,46 +15,49 @@ class ReminderScheduler:
     def __init__(self, bot: Bot, db: Database):
         self.bot = bot
         self.db = db
-        self.scheduler = AsyncIOScheduler()
+        # Устанавливаем часовой пояс Ташкента
+        self.timezone = pytz.timezone('Asia/Tashkent')
+        self.scheduler = AsyncIOScheduler(timezone=self.timezone)
 
     def start(self):
         """Запустить планировщик"""
         # Утреннее напоминание (07:30)
         self.scheduler.add_job(
             self.send_morning_reminder,
-            CronTrigger(hour=7, minute=30),
+            CronTrigger(hour=13, minute=35, timezone=self.timezone),
             id="morning_reminder"
         )
 
         # Дневное напоминание (17:50)
         self.scheduler.add_job(
             self.send_afternoon_reminder,
-            CronTrigger(hour=17, minute=50),
+            CronTrigger(hour=13, minute=40, timezone=self.timezone),
             id="afternoon_reminder"
         )
 
         # Вечернее напоминание (20:00)
         self.scheduler.add_job(
             self.send_evening_reminder,
-            CronTrigger(hour=20, minute=0),
+            CronTrigger(hour=13, minute=50, timezone=self.timezone),
             id="evening_reminder"
         )
 
         self.scheduler.start()
-        print("Scheduler started successfully")
+        print(f"Scheduler started with timezone: {self.timezone}")
 
     def stop(self):
         """Остановить планировщик"""
         self.scheduler.shutdown()
 
     async def send_morning_reminder(self):
-        """Отправить утреннее напоминание (07:30)"""
-        print(f"[{datetime.now()}] Sending morning reminders...")
+        """Отправить утреннее напоминание"""
+        print(f"[{datetime.now()}] Job 'morning_reminder' triggered.")
+        
+        # Получаем всех пользователей
+        all_users = await self.db.get_all_users()
+        print(f"[{datetime.now()}] Found {len(all_users)} users for morning reminder.")
 
-        # Получаем всех активных пользователей
-        active_users = await self.get_active_marathon_users()
-
-        for user in active_users:
+        for user in all_users:
             user_id = user['user_id']
             language = user['language']
 
@@ -72,13 +76,14 @@ class ReminderScheduler:
                 print(f"Failed to send morning reminder to {user_id}: {e}")
 
     async def send_afternoon_reminder(self):
-        """Отправить дневное напоминание (17:50)"""
-        print(f"[{datetime.now()}] Sending afternoon reminders...")
+        """Отправить дневное напоминание"""
+        print(f"[{datetime.now()}] Job 'afternoon_reminder' triggered.")
 
-        # Получаем пользователей, которые еще не отметили сегодняшний день
-        users_without_completion = await self.get_users_without_today_completion()
+        # Получаем всех пользователей
+        all_users = await self.db.get_all_users()
+        print(f"[{datetime.now()}] Found {len(all_users)} users for afternoon reminder.")
 
-        for user in users_without_completion:
+        for user in all_users:
             user_id = user['user_id']
             language = user['language']
 
@@ -91,13 +96,14 @@ class ReminderScheduler:
                 print(f"Failed to send afternoon reminder to {user_id}: {e}")
 
     async def send_evening_reminder(self):
-        """Отправить вечернее напоминание (20:00)"""
-        print(f"[{datetime.now()}] Sending evening reminders...")
+        """Отправить вечернее напоминание"""
+        print(f"[{datetime.now()}] Job 'evening_reminder' triggered.")
 
-        # Получаем всех активных пользователей
-        active_users = await self.get_active_marathon_users()
+        # Получаем всех пользователей
+        all_users = await self.db.get_all_users()
+        print(f"[{datetime.now()}] Found {len(all_users)} users for evening reminder.")
 
-        for user in active_users:
+        for user in all_users:
             user_id = user['user_id']
             language = user['language']
 

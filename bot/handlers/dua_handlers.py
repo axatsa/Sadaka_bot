@@ -1,7 +1,7 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 from bot.states import UserStates
 from bot.database.models import Database
@@ -17,37 +17,46 @@ async def get_user_language(db: Database, user_id: int) -> str:
 
 
 def get_main_menu_keyboard(language: str):
-    builder = InlineKeyboardBuilder()
-    builder.button(text=get_text(language, "marathon_stats"), callback_data="marathon_stats")
-    builder.button(text=get_text(language, "dua_button"), callback_data="send_dua")
-    builder.button(text=get_text(language, "settings"), callback_data="settings")
+    builder = ReplyKeyboardBuilder()
+    builder.button(text=get_text(language, "marathon_stats"))
+    builder.button(text=get_text(language, "dua_button"))
+    builder.button(text=get_text(language, "settings"))
     builder.adjust(1)
-    return builder.as_markup()
+    return builder.as_markup(resize_keyboard=True)
 
 
 @router.callback_query(F.data == "send_dua")
-async def start_dua_process(callback: CallbackQuery, state: FSMContext, db: Database):
-    user_id = callback.from_user.id
+async def start_dua_process_callback(callback: CallbackQuery, state: FSMContext, db: Database):
+    await _start_dua_process(callback.message, state, db, callback.from_user.id, is_callback=True)
+    await callback.answer()
+
+@router.message(F.text.in_([get_text("uz_latin", "dua_button"), get_text("uz_cyrillic", "dua_button"), get_text("ru", "dua_button")]))
+async def start_dua_process_message(message: Message, state: FSMContext, db: Database):
+    await _start_dua_process(message, state, db, message.from_user.id, is_callback=False)
+
+async def _start_dua_process(message: Message, state: FSMContext, db: Database, user_id: int, is_callback: bool):
     language = await get_user_language(db, user_id)
 
     user_duas_count = await db.count_user_duas_this_juma(user_id)
     total_duas_count = await db.count_total_duas_this_juma()
 
     if user_duas_count >= DUA_LIMIT_PER_USER:
-        await callback.message.edit_text(
-            get_text(language, "dua_limit_user"),
-            reply_markup=get_back_to_menu_keyboard(language)
-        )
-        await callback.answer()
+        text = get_text(language, "dua_limit_user")
+        reply_markup = get_back_to_menu_keyboard(language)
+        if is_callback:
+            await message.edit_text(text, reply_markup=reply_markup)
+        else:
+            await message.answer(text, reply_markup=reply_markup)
+
         return
 
     if total_duas_count >= DUA_LIMIT_TOTAL:
-        await callback.message.edit_text(
-            get_text(language, "dua_limit_total"),
-            reply_markup=get_back_to_menu_keyboard(language)
-        )
-        await callback.answer()
-        return
+        text = get_text(language, "dua_limit_total")
+        reply_markup = get_back_to_menu_keyboard(language)
+        if is_callback:
+            await message.edit_text(text, reply_markup=reply_markup)
+        else:
+            await message.answer(text, reply_markup=reply_markup)
 
     if total_duas_count >= DUA_LIMIT_TOTAL - 5:
         builder = InlineKeyboardBuilder()
@@ -55,15 +64,14 @@ async def start_dua_process(callback: CallbackQuery, state: FSMContext, db: Data
         builder.button(text=get_text(language, "dua_send_later"), callback_data="main_menu")
         builder.adjust(1)
 
-        await callback.message.edit_text(
-            get_text(language, "dua_limit_warning", total=total_duas_count),
-            reply_markup=builder.as_markup()
-        )
-        await callback.answer()
+        text = get_text(language, "dua_limit_warning", total=total_duas_count)
+        if is_callback:
+            await message.edit_text(text, reply_markup=builder.as_markup())
+        else:
+            await message.answer(text, reply_markup=builder.as_markup())
         return
 
-    await ask_dua_name_choice(callback.message, language, state)
-    await callback.answer()
+    await ask_dua_name_choice(message, language, state, is_callback)
 
 
 @router.callback_query(F.data == "dua_confirm_send")
@@ -71,21 +79,22 @@ async def confirm_dua_send(callback: CallbackQuery, state: FSMContext, db: Datab
     user_id = callback.from_user.id
     language = await get_user_language(db, user_id)
 
-    await ask_dua_name_choice(callback.message, language, state)
+    await ask_dua_name_choice(callback.message, language, state, is_callback=True)
     await callback.answer()
 
 
-async def ask_dua_name_choice(message: Message, language: str, state: FSMContext):
+async def ask_dua_name_choice(message: Message, language: str, state: FSMContext, is_callback: bool):
     builder = InlineKeyboardBuilder()
     builder.button(text=get_text(language, "dua_my_name"), callback_data="dua_name_real")
     builder.button(text=get_text(language, "dua_anonymous"), callback_data="dua_name_anonymous")
     builder.button(text=get_text(language, "back_button"), callback_data="main_menu")
     builder.adjust(1)
 
-    await message.edit_text(
-        get_text(language, "dua_name_question"),
-        reply_markup=builder.as_markup()
-    )
+    text = get_text(language, "dua_name_question")
+    if is_callback:
+        await message.edit_text(text, reply_markup=builder.as_markup())
+    else:
+        await message.answer(text, reply_markup=builder.as_markup())
     await state.set_state(UserStates.WAITING_DUA_NAME_CHOICE)
 
 
@@ -176,7 +185,15 @@ async def show_main_menu(callback: CallbackQuery, state: FSMContext, db: Databas
     user_id = callback.from_user.id
     language = await get_user_language(db, user_id)
 
-    await callback.message.edit_text(
+    # Если пользователь нажал "Главное меню" (например кнопка Назад),
+    # удаляем сообщение с инлайн меню (календарь, настройки и т.д.)
+    # и отправляем новое сообщение "Главное меню" с Reply клавиатурой.
+    try:
+        await callback.message.delete()
+    except:
+        pass
+
+    await callback.message.answer(
         get_text(language, "main_menu"),
         reply_markup=get_main_menu_keyboard(language)
     )

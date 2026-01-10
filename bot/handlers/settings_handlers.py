@@ -6,14 +6,23 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.database.models import Database
 from bot.locales.texts import get_text
 from bot.states import UserStates
+from bot.utils.formatting import format_number, parse_amount
 
 router = Router()
 
 
 @router.callback_query(F.data == "settings")
 async def show_settings(callback: CallbackQuery, db: Database):
-    """Показать меню настроек"""
-    user_id = callback.from_user.id
+    await _send_settings(callback.message, db, callback.from_user.id, is_callback=True)
+    await callback.answer()
+
+@router.message(F.text.in_([get_text("uz_latin", "settings"), get_text("uz_cyrillic", "settings"), get_text("ru", "settings")]))
+async def show_settings_message(message: Message, db: Database):
+    await _send_settings(message, db, message.from_user.id, is_callback=False)
+
+
+async def _send_settings(message: Message, db: Database, user_id: int, is_callback: bool):
+    """Internal function to show settings"""
     user = await db.get_user(user_id)
     language = user['language'] if user else 'uz_latin'
 
@@ -26,17 +35,18 @@ async def show_settings(callback: CallbackQuery, db: Database):
         text=get_text(language, "change_plan"),
         callback_data="settings_change_plan"
     )
+    # Кнопка назад для закрытия или возврата
     builder.button(
         text=get_text(language, "back_button"),
         callback_data="main_menu"
     )
     builder.adjust(1)
-
-    await callback.message.edit_text(
-        get_text(language, "settings_menu"),
-        reply_markup=builder.as_markup()
-    )
-    await callback.answer()
+    
+    text = get_text(language, "settings_menu")
+    if is_callback:
+        await message.edit_text(text, reply_markup=builder.as_markup())
+    else:
+        await message.answer(text, reply_markup=builder.as_markup())
 
 
 @router.callback_query(F.data == "settings_change_language")
@@ -103,7 +113,7 @@ async def receive_new_plan(message: Message, state: FSMContext, db: Database):
     language = user['language'] if user else 'uz_latin'
 
     try:
-        new_plan = int(message.text)
+        new_plan = parse_amount(message.text)
         if new_plan < 1000:
             await message.answer(get_text(language, "daily_plan_too_small"))
             return
@@ -124,8 +134,8 @@ async def receive_new_plan(message: Message, state: FSMContext, db: Database):
             get_text(
                 language, 
                 "plan_updated", 
-                daily_plan=f"{new_plan:,}".replace(",", " "), 
-                total_projected=f"{total_projected:,}".replace(",", " "),
+                daily_plan=format_number(new_plan),
+                total_projected=format_number(total_projected),
                 contribution_percent=contribution_percent
             ),
             reply_markup=get_back_to_settings_keyboard(language)

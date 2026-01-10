@@ -6,14 +6,24 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.states import UserStates
 from bot.database.models import Database
 from bot.locales.texts import get_text
+from bot.utils.formatting import format_number, parse_amount
 
 router = Router()
 
 
 @router.callback_query(F.data == "marathon_stats")
 async def show_marathon_stats(callback: CallbackQuery, db: Database):
-    """Показать статистику марафона"""
-    user_id = callback.from_user.id
+    await _send_marathon_stats(callback.message, db, callback.from_user.id, is_callback=True)
+    await callback.answer()
+
+
+@router.message(F.text.in_([get_text("uz_latin", "marathon_stats"), get_text("uz_cyrillic", "marathon_stats"), get_text("ru", "marathon_stats")]))
+async def show_marathon_stats_message(message: Message, db: Database):
+    await _send_marathon_stats(message, db, message.from_user.id, is_callback=False)
+
+
+async def _send_marathon_stats(message: Message, db: Database, user_id: int, is_callback: bool):
+    """Internal function to show marathon stats"""
     user = await db.get_user(user_id)
     language = user['language'] if user else 'uz_latin'
 
@@ -21,11 +31,12 @@ async def show_marathon_stats(callback: CallbackQuery, db: Database):
     marathon = await db.get_active_marathon()
 
     if not marathon:
-        await callback.message.edit_text(
-            get_text(language, "no_active_marathon"),
-            reply_markup=get_back_button(language)
-        )
-        await callback.answer()
+        text = get_text(language, "no_active_marathon")
+        reply_markup = get_back_button(language)
+        if is_callback:
+            await message.edit_text(text, reply_markup=reply_markup)
+        else:
+            await message.answer(text, reply_markup=reply_markup)
         return
 
     # Получаем статистику марафона
@@ -50,7 +61,7 @@ async def show_marathon_stats(callback: CallbackQuery, db: Database):
     completed_days = user_stats.get('completed_days', 0)
     missed_days = max(0, days_passed - completed_days)
     
-    daily_plan = user.get('daily_plan', 0)
+    daily_plan = user['daily_plan'] if user else 0
     expected_contribution = daily_plan * days_passed
     
     user_contribution = user_stats.get('total_contribution', 0)
@@ -68,11 +79,11 @@ async def show_marathon_stats(callback: CallbackQuery, db: Database):
     stats_text = get_text(
         language,
         "marathon_stats_text",
-        goal=f"{goal:,}".replace(",", " "),
-        current=f"{marathon_stats.get('total_collected', 0):,}".replace(",", " "),
+        goal=format_number(goal),
+        current=format_number(marathon_stats.get('total_collected', 0)),
         percent=marathon_stats.get('percent', 0),
         participants_count=marathon_stats.get('participants_count', 0),
-        user_contribution=f"{user_contribution:,}".replace(",", " "),
+        user_contribution=format_number(user_contribution),
         user_plan_percent=user_plan_percent,
         rank=rank,
         completed_days=completed_days,
@@ -86,17 +97,20 @@ async def show_marathon_stats(callback: CallbackQuery, db: Database):
         text=get_text(language, "view_calendar"),
         callback_data="calendar_current"
     )
+    # Кнопка назад нужна только если это было инлайн взаимодействие, или чтобы закрыть инлайн
+    # Если мы в Persistent Menu, кнопка назад в стате (которая пришла новым сообщением)
+    # может просто удалять сообщение статистики?
+    # Пока оставим как есть, она вернет "Main Menu" через callback
     builder.button(
         text=get_text(language, "back_button"),
         callback_data="main_menu"
     )
     builder.adjust(1)
 
-    await callback.message.edit_text(
-        stats_text,
-        reply_markup=builder.as_markup()
-    )
-    await callback.answer()
+    if is_callback:
+        await message.edit_text(stats_text, reply_markup=builder.as_markup())
+    else:
+        await message.answer(stats_text, reply_markup=builder.as_markup())
 
 
 @router.callback_query(F.data.startswith("calendar_"))
@@ -192,7 +206,7 @@ async def receive_daily_amount(message: Message, state: FSMContext, db: Database
     language = user['language'] if user else 'uz_latin'
 
     try:
-        amount = int(message.text)
+        amount = parse_amount(message.text)
         if amount <= 0:
             await message.answer(get_text(language, "invalid_number"))
             return
@@ -269,9 +283,9 @@ async def send_daily_stats(message: Message, db: Database, user_id: int, maratho
         language,
         "daily_stats_message",
         status=status_icon,
-        user_amount=f"{amount:,}".replace(",", " "),
+        user_amount=format_number(amount),
         participants=daily_stats['participants_count'],
-        total_amount=f"{daily_stats['total_amount']:,}".replace(",", " "),
+        total_amount=format_number(daily_stats['total_amount']),
         day_progress=day_progress
     )
     

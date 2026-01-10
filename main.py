@@ -50,9 +50,11 @@ async def main():
     dp.include_router(dua_router)
 
     # Инициализируем и запускаем планировщик напоминаний
+    logger.info("Initializing reminder scheduler...")
     scheduler = ReminderScheduler(bot, db)
+    logger.info("Starting reminder scheduler...")
     scheduler.start()
-    logger.info("Reminder scheduler started")
+    logger.info(f"Reminder scheduler started successfully. Jobs: {scheduler.scheduler.get_jobs()}")
 
     logger.info("Bot starting...")
     try:
